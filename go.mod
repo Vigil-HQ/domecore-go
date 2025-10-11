@@ -1,4 +1,4 @@
-module github.com/marketdome/domecore-go
+module github.com/Vigil-HQ/domecore-go
 
 go 1.24.3
 
