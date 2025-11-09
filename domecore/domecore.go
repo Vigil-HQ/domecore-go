@@ -146,21 +146,26 @@ func (helper *contextHelper) GetUserClaims(ctx context.Context) *UserAuthClaims 
 }
 
 func (helper *contextHelper) GetTenant(ctx context.Context) (string, error) {
-	// Extract metadata from context
+	// First, try to get tenant ID from context (set by UnaryTenantInterceptor for Connect-RPC)
+	if tenantID := ctx.Value(XTenantKey); tenantID != nil {
+		if id, ok := tenantID.(string); ok && id != "" {
+			log.Printf("Retrieved tenant ID from context: %s", id)
+			return id, nil
+		}
+	}
+
+	// Fallback to gRPC metadata (for backward compatibility with gRPC)
 	md, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return "", errors.New("could not extract metadata")
+	if ok {
+		// Check if the X-Tenant-Id header is present in gRPC metadata
+		companyID := md[XTenantKey]
+		if len(companyID) > 0 && companyID[0] != "" {
+			log.Printf("Received X-Tenant-Id from gRPC metadata: %s", companyID[0])
+			return companyID[0], nil
+		}
 	}
 
-	// Check if the X-Company-Id header is present
-	companyID := md[XTenantKey]
-	if len(companyID) == 0 {
-		return "", errors.New("could not extract company id")
-	}
-
-	log.Printf("Received X-Company-Id: %s", companyID[0])
-
-	return companyID[0], nil
+	return "", errors.New("could not extract tenant id: x-tenant-id not found in context or metadata")
 }
 
 func NewContextHelper(authenticator Authenticator) ContextHelper {
