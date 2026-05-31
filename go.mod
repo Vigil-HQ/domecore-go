@@ -14,8 +14,8 @@ require (
 	github.com/golang-jwt/jwt/v4 v4.5.2
 	github.com/nats-io/nats.go v1.46.1
 	github.com/rs/cors v1.11.1
-	go.uber.org/zap v1.27.0
 	golang.org/x/net v0.47.0
+	google.golang.org/genproto v0.0.0-20240227224415-6ceb2ff114de
 	google.golang.org/grpc v1.76.0
 	gorm.io/gorm v1.31.1
 )
@@ -49,7 +49,6 @@ require (
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/shiena/ansicolor v0.0.0-20200904210342-c7312218db18 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect
-	go.uber.org/multierr v1.10.0 // indirect
 	golang.org/x/crypto v0.46.0 // indirect
 	golang.org/x/exp v0.0.0-20251219203646-944ab1f22d93 // indirect
 	golang.org/x/oauth2 v0.30.0 // indirect
