@@ -1,3 +1,5 @@
+// Package domecore provides authentication and authorization functionality for DOME services,
+// including OIDC token validation and middleware for gRPC and Connect-RPC services.
 package domecore
 
 import (
@@ -17,10 +19,16 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// keycloakAuthenticator implements the Authenticator interface for Keycloak OIDC authentication.
+// It wraps an OIDC ID token verifier and provides methods to extract and validate JWT tokens
+// from HTTP headers and gRPC metadata.
 type keycloakAuthenticator struct {
 	verifier *oidc.IDTokenVerifier
 }
 
+// ExtractHeaderToken extracts the bearer token from a Connect-RPC request's Authorization header.
+// It validates that the header is present and properly formatted as "Bearer <token>".
+// Returns the token string or an error if the header is missing or malformed.
 func (authenticator *keycloakAuthenticator) ExtractHeaderToken(request connect.AnyRequest) (string, error) {
 	// Look for the authorization header.
 	authHeader := request.Header().Get("Authorization")
@@ -37,6 +45,8 @@ func (authenticator *keycloakAuthenticator) ExtractHeaderToken(request connect.A
 	return parts[1], nil
 }
 
+// GetVerifier returns the underlying OIDC ID token verifier used for validating JWT tokens.
+// This verifier is configured with the client ID and issuer information during authenticator initialization.
 func (authenticator *keycloakAuthenticator) GetVerifier() *oidc.IDTokenVerifier {
 	return authenticator.verifier
 }
@@ -75,6 +85,9 @@ func NewAuthenticator(ctx context.Context) (Authenticator, error) {
 }
 
 // ExtractToken extracts the bearer token from the gRPC metadata (authorization header).
+// It retrieves the metadata from the incoming context, locates the authorization header,
+// and validates that it follows the "Bearer <token>" format.
+// Returns the token string or an error if metadata is missing, the header is absent, or the format is invalid.
 func (authenticator *keycloakAuthenticator) ExtractToken(ctx context.Context) (string, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
@@ -96,7 +109,10 @@ func (authenticator *keycloakAuthenticator) ExtractToken(ctx context.Context) (s
 	return parts[1], nil
 }
 
-// ValidateTokenMiddleware validates the JWT token in the authorization header.
+// ValidateTokenMiddleware is a gRPC unary interceptor that validates JWT tokens in incoming requests.
+// It extracts the token from the authorization header, verifies its signature and validity,
+// parses the claims into a UserAuthClaims struct, and adds the claims to the request context
+// for use by downstream handlers. Returns an authentication error if any validation step fails.
 func (authenticator *keycloakAuthenticator) ValidateTokenMiddleware(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 	// Extract and validate the token from metadata (authorization header).
 	token, err := authenticator.ExtractToken(ctx)

@@ -1,3 +1,5 @@
+// Package domecore provides authorization functionality using Casbin for role-based access control (RBAC).
+// It implements permission checking and policy enforcement for RPC procedures.
 package domecore
 
 import (
