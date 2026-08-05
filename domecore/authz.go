@@ -107,11 +107,11 @@ func (auth *authZ) HasPermission(userClaims *UserAuthClaims, tenant string, doma
 // Returns:
 //   - error if loading the policy fails, nil otherwise
 func (auth *authZ) Load() error {
-	//auth.enforcer.EnableLog(true)
-	//if err := auth.enforcer.LoadPolicy(); err != nil {
-	//	return err
-	//}
-	//auth.enforcer.EnableAutoSave(true)
+	auth.enforcer.EnableLog(true)
+	if err := auth.enforcer.LoadPolicy(); err != nil {
+		return err
+	}
+	auth.enforcer.EnableAutoSave(true)
 
 	return nil
 }
