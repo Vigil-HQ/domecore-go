@@ -9,7 +9,7 @@ import (
 
 	commonv1 "buf.build/gen/go/marketdome/common/protocolbuffers/go/marketdome/common/v1"
 	"github.com/beego/beego/v2/core/logs"
-	"github.com/casbin/casbin/v2"
+	"github.com/casbin/casbin/v3"
 	gormadapter "github.com/casbin/gorm-adapter/v3"
 	"gorm.io/gorm"
 )
@@ -107,7 +107,7 @@ func (auth *authZ) HasPermission(userClaims *UserAuthClaims, tenant string, doma
 // Returns:
 //   - error if loading the policy fails, nil otherwise
 func (auth *authZ) Load() error {
-	auth.enforcer.EnableLog(true)
+	//auth.enforcer.EnableLog(true)
 	if err := auth.enforcer.LoadPolicy(); err != nil {
 		return err
 	}
