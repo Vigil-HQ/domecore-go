@@ -16,6 +16,7 @@ import (
 	"github.com/coreos/go-oidc"
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/nats-io/nats.go/jetstream"
+	"github.com/pion/webrtc/v4"
 	"golang.org/x/net/http2"
 	"google.golang.org/grpc"
 	"gorm.io/gorm"
@@ -298,4 +299,104 @@ type AuthZ interface {
 	// Load initializes the authorization enforcer by loading the policy model and rules.
 	// It enables auto-save and logging features for the enforcer.
 	Load() error
+}
+
+// WebRTC defines the entry point for establishing WebRTC sessions from a backend service.
+// It owns a shared Pion API (codecs, interceptors, network settings) and acts as a registry
+// for standalone peers and multi-party rooms. It is signaling-agnostic: SDP and ICE candidates
+// are exchanged through a caller-supplied Signaler or returned directly from method calls.
+type WebRTC interface {
+	// NewPeer creates a standalone server-side peer connection for one-to-one sessions.
+	// An empty peerID generates a random UUID.
+	NewPeer(peerID string, options PeerOptions) (Peer, error)
+	// CreateRoom creates a new multi-party room (SFU) with the given identifier
+	CreateRoom(roomID string, options RoomOptions) (Room, error)
+	// GetRoom returns an existing room, or ErrRoomNotFound if it does not exist
+	GetRoom(roomID string) (Room, error)
+	// GetOrCreateRoom returns an existing room or creates it with the given options when absent
+	GetOrCreateRoom(roomID string, options RoomOptions) (Room, error)
+	// DeleteRoom closes a room, disconnects all of its peers, and removes it from the registry
+	DeleteRoom(roomID string) error
+	// Rooms returns a snapshot of all active rooms
+	Rooms() []Room
+	// ICEServers returns the STUN/TURN servers configured for this instance so they can be shared with clients
+	ICEServers() []webrtc.ICEServer
+	// API returns the underlying Pion API for advanced use cases not covered by this package
+	API() *webrtc.API
+	// Close closes every room and standalone peer managed by this instance
+	Close() error
+}
+
+// Room defines a multi-party WebRTC session that operates as a Selective Forwarding Unit (SFU).
+// Media published by any peer is forwarded to every other peer in the room, and messages sent on
+// the room data channel can be broadcast to all participants. The server always initiates
+// negotiation for room peers: offers are delivered through each peer's Signaler.
+type Room interface {
+	// ID returns the unique identifier of the room
+	ID() string
+	// Join adds a peer to the room, subscribes it to all published tracks and sends it an initial offer.
+	// The options must include a Signaler.
+	Join(peerID string, options PeerOptions) (Peer, error)
+	// Leave removes a peer from the room, closes its connection and unpublishes its tracks
+	Leave(peerID string) error
+	// GetPeer returns a peer in the room, or ErrPeerNotFound if it is not a member
+	GetPeer(peerID string) (Peer, error)
+	// Peers returns a snapshot of all peers currently in the room
+	Peers() []Peer
+	// Broadcast sends binary data on the room data channel to all peers except the excluded ones
+	Broadcast(data []byte, excludePeerIDs ...string) error
+	// BroadcastText sends a text message on the room data channel to all peers except the excluded ones
+	BroadcastText(text string, excludePeerIDs ...string) error
+	// Close disconnects every peer and marks the room as closed
+	Close() error
+}
+
+// Peer defines a single server-side WebRTC peer connection.
+// It wraps a Pion PeerConnection with offer/answer handling, trickle ICE buffering,
+// renegotiation management, and data channel helpers.
+type Peer interface {
+	// ID returns the unique identifier of the peer
+	ID() string
+	// Metadata returns the application-defined metadata attached when the peer was created
+	Metadata() map[string]string
+	// CreateOffer creates an offer and sets it as the local description without signaling it.
+	// Use this for request/response flows where the caller returns the offer directly.
+	CreateOffer(ctx context.Context) (webrtc.SessionDescription, error)
+	// Negotiate creates an offer and delivers it through the Signaler. If a negotiation is already
+	// in progress it is deferred until the pending answer arrives.
+	Negotiate(ctx context.Context) error
+	// HandleOffer applies a remote offer and returns the local answer for the caller to deliver
+	HandleOffer(ctx context.Context, offer webrtc.SessionDescription) (webrtc.SessionDescription, error)
+	// HandleAnswer applies a remote answer to a previously sent offer
+	HandleAnswer(answer webrtc.SessionDescription) error
+	// AddICECandidate adds a remote ICE candidate, buffering it until a remote description is set
+	AddICECandidate(candidate webrtc.ICECandidateInit) error
+	// CreateDataChannel opens a new data channel with the given label
+	CreateDataChannel(label string, init *webrtc.DataChannelInit) (*webrtc.DataChannel, error)
+	// Send sends binary data on the data channel with the given label
+	Send(label string, data []byte) error
+	// SendText sends a text message on the data channel with the given label
+	SendText(label string, text string) error
+	// AddTrack adds a local media track to the connection. Call Negotiate afterwards to signal the change.
+	AddTrack(track webrtc.TrackLocal) (*webrtc.RTPSender, error)
+	// RemoveTrack stops sending a local track. Call Negotiate afterwards to signal the change.
+	RemoveTrack(sender *webrtc.RTPSender) error
+	// ConnectionState returns the current aggregate connection state of the peer
+	ConnectionState() webrtc.PeerConnectionState
+	// PeerConnection returns the underlying Pion PeerConnection for advanced use cases
+	PeerConnection() *webrtc.PeerConnection
+	// Done returns a channel that is closed once the peer has been closed
+	Done() <-chan struct{}
+	// Close closes the peer connection and releases its resources
+	Close() error
+}
+
+// Signaler defines the outbound signaling transport used to reach a remote peer.
+// Implementations typically write to a WebSocket, publish to NATS, or push over a Connect stream.
+// Methods may be called concurrently from Pion's internal goroutines.
+type Signaler interface {
+	// SignalOffer delivers a server-generated SDP offer to the remote peer
+	SignalOffer(peerID string, offer webrtc.SessionDescription) error
+	// SignalICECandidate delivers a locally gathered ICE candidate to the remote peer
+	SignalICECandidate(peerID string, candidate webrtc.ICECandidateInit) error
 }
