@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>domecore video room</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 16px; background: #111; color: #eee; }
+    #videos { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 8px; }
+    figure { margin: 0; }
+    video { width: 100%; background: #000; border-radius: 6px; }
+    figcaption { font-size: 12px; opacity: .7; }
+    #chat { margin-top: 16px; max-width: 600px; }
+    #log { height: 160px; overflow-y: auto; background: #1b1b1b; padding: 8px; border-radius: 6px; font-size: 14px; }
+    #chat form { display: flex; gap: 8px; margin-top: 8px; }
+    #chat input { flex: 1; }
+  </style>
+</head>
+<body>
+  <h3 id="title"></h3>
+  <div id="videos">
+    <figure><video id="local" autoplay muted playsinline></video><figcaption>you</figcaption></figure>
+  </div>
+  <div id="chat">
+    <div id="log"></div>
+    <form id="send"><input id="text" placeholder="Message the room" autocomplete="off"><button>Send</button></form>
+  </div>
+
+  <script type="module">
+    const params = new URLSearchParams(location.search);
+    const room = params.get("room") || "standup";
+    const name = params.get("name") || `guest-${Math.floor(Math.random() * 1000)}`;
+    document.getElementById("title").textContent = `Room "${room}" as ${name}`;
+
+    const log = (line) => {
+      const el = document.getElementById("log");
+      el.append(Object.assign(document.createElement("div"), { textContent: line }));
+      el.scrollTop = el.scrollHeight;
+    };
+
+    const { iceServers } = await (await fetch("/config")).json();
+    const local = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+    document.getElementById("local").srcObject = local;
+
+    const pc = new RTCPeerConnection({ iceServers });
+    const scheme = location.protocol === "https:" ? "wss" : "ws";
+    const ws = new WebSocket(`${scheme}://${location.host}/ws?room=${encodeURIComponent(room)}&name=${encodeURIComponent(name)}`);
+    const send = (message) => ws.send(JSON.stringify(message));
+    let published = false;
+    let roomChannel;
+
+    pc.onicecandidate = ({ candidate }) => candidate && send({ type: "candidate", candidate });
+
+    // Forwarded tracks use the publisher's peer ID as the stream ID: one tile per stream.
+    pc.ontrack = ({ streams: [stream] }) => {
+      if (!stream || document.getElementById(stream.id)) return;
+      const figure = document.createElement("figure");
+      figure.id = stream.id;
+      const video = Object.assign(document.createElement("video"), { autoplay: true, playsInline: true, srcObject: stream });
+      figure.append(video, Object.assign(document.createElement("figcaption"), { textContent: stream.id }));
+      document.getElementById("videos").append(figure);
+      // When the publisher leaves, the server renegotiates and its tracks are removed.
+      stream.onremovetrack = () => stream.getTracks().length === 0 && figure.remove();
+    };
+
+    // The server creates the room data channel on every member.
+    pc.ondatachannel = ({ channel }) => {
+      if (channel.label !== "domecore-room") return;
+      roomChannel = channel;
+      channel.onmessage = ({ data }) => log(data);
+    };
+
+    // In a room the server is always the offerer: answer every offer, never send one.
+    ws.onmessage = async ({ data }) => {
+      const message = JSON.parse(data);
+      if (message.type === "offer") {
+        await pc.setRemoteDescription(message.sdp);
+        if (!published) {
+          // Added after the first offer so the tracks reuse the server's recvonly transceivers.
+          local.getTracks().forEach((track) => pc.addTrack(track, local));
+          published = true;
+        }
+        await pc.setLocalDescription(await pc.createAnswer());
+        send({ type: "answer", sdp: pc.localDescription });
+      } else if (message.type === "candidate") {
+        await pc.addIceCandidate(message.candidate);
+      } else if (message.type === "error") {
+        log(`error: ${message.error}`);
+      }
+    };
+    ws.onclose = () => log("* disconnected");
+
+    document.getElementById("send").onsubmit = (event) => {
+      event.preventDefault();
+      const input = document.getElementById("text");
+      if (!input.value || roomChannel?.readyState !== "open") return;
+      roomChannel.send(`${name}: ${input.value}`);
+      log(`${name}: ${input.value}`); // relayed messages are not echoed back to the sender
+      input.value = "";
+    };
+  </script>
+</body>
+</html>

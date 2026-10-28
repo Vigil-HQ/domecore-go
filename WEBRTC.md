@@ -13,6 +13,8 @@ It handles:
 
 It does **not** pick a signaling transport. You decide how SDP and ICE candidates travel between the client and your service (WebSocket, NATS, Connect streams, HTTP), and plug that in through the `Signaler` interface.
 
+Runnable examples live in [`examples/webrtc`](examples/webrtc/README.md).
+
 ---
 
 ## Contents

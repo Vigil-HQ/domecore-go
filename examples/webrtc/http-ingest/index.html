@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>domecore ingest</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 16px; max-width: 640px; }
+    video { width: 100%; background: #000; border-radius: 6px; }
+    #log { font-family: ui-monospace, monospace; font-size: 13px; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <video id="preview" autoplay muted playsinline></video>
+  <p>
+    <button id="start">Start ingest</button>
+    <button id="ping" disabled>Send ping</button>
+    <button id="stop" disabled>Stop</button>
+  </p>
+  <div id="log"></div>
+
+  <script type="module">
+    const log = (line) => (document.getElementById("log").textContent += line + "\n");
+    let pc, channel, location_;
+
+    document.getElementById("start").onclick = async () => {
+      const { iceServers } = await (await fetch("/config")).json();
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+      document.getElementById("preview").srcObject = stream;
+
+      pc = new RTCPeerConnection({ iceServers });
+      stream.getTracks().forEach((track) => pc.addTransceiver(track, { direction: "sendonly", streams: [stream] }));
+
+      // The client opens the data channel; the server echoes what it receives.
+      channel = pc.createDataChannel("control");
+      channel.onopen = () => (document.getElementById("ping").disabled = false);
+      channel.onmessage = ({ data }) => log(`server: ${data}`);
+      pc.onconnectionstatechange = () => log(`connection: ${pc.connectionState}`);
+
+      // Non-trickle: wait for ICE gathering so the offer carries every candidate.
+      await pc.setLocalDescription(await pc.createOffer());
+      if (pc.iceGatheringState !== "complete") {
+        await new Promise((resolve) => pc.addEventListener("icegatheringstatechange",
+          () => pc.iceGatheringState === "complete" && resolve()));
+      }
+
+      const res = await fetch("/ingest", { method: "POST", body: JSON.stringify(pc.localDescription) });
+      if (!res.ok) return log(`ingest failed: ${await res.text()}`);
+      location_ = res.headers.get("Location");
+      await pc.setRemoteDescription(await res.json());
+      log(`session ${location_}`);
+
+      document.getElementById("start").disabled = true;
+      document.getElementById("stop").disabled = false;
+    };
+
+    document.getElementById("ping").onclick = () => channel.send(`ping ${new Date().toISOString()}`);
+
+    document.getElementById("stop").onclick = async () => {
+      await fetch(location_, { method: "DELETE" });
+      pc.close();
+      document.getElementById("preview").srcObject?.getTracks().forEach((t) => t.stop());
+      log("stopped");
+      document.getElementById("stop").disabled = true;
+      document.getElementById("ping").disabled = true;
+      document.getElementById("start").disabled = false;
+    };
+  </script>
+</body>
+</html>
